@@ -4,6 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Dashboard WTI – Mercato Petrolifero</title>
+ <script>
+  (function(){
+    var pwd = prompt("Inserisci la password per accedere:");
+    if(pwd !== "antonio"){
+      document.write("<h2 style='font-family:sans-serif;text-align:center;margin-top:40vh'>Accesso negato.</h2>");
+      throw new Error("stop");
+    }
+  })();
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
