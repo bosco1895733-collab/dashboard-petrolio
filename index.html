@@ -827,12 +827,14 @@ function renderOutlier(){
   const d=filtered(); if(!d.length) return;
   const method=document.getElementById('sel-out-method').value;
 
-  makeChart('ch-out-serie',{type:'scatter',data:{datasets:[
-    {label:'Normale',data:d.filter(r=>!isOutlier(r,method)).map(r=>({x:r.ds,y:r.p,label:r.ds})),backgroundColor:'rgba(26,122,154,0.6)',pointRadius:3},
-    {label:'Outlier',data:d.filter(r=>isOutlier(r,method)).map(r=>({x:r.ds,y:r.p,label:r.ds})),backgroundColor:'rgba(192,57,43,0.85)',pointRadius:5,pointStyle:'triangle'}
-  ]},options:{responsive:true,maintainAspectRatio:false,
-    plugins:{legend:{labels:{font:{size:10},boxWidth:10}},tooltip:{callbacks:{label:ctx=>ctx.raw.label+': '+fmt(ctx.raw.y)+' $'}}},
-    scales:{x:{type:'category',ticks:{maxTicksLimit:12,font:{size:9}},grid:{display:false}},y:{ticks:{callback:v=>v+' $',font:{size:9}},grid:{color:'#e8edf4'}}}}});
+ makeChart('ch-out-serie',{type:'line',data:{
+    labels:d.map(r=>r.ds),
+    datasets:[
+      {label:'Normale',data:d.map(r=>isOutlier(r,method)?null:r.p),backgroundColor:'rgba(26,122,154,0.6)',borderColor:'transparent',pointRadius:3,pointHoverRadius:5,spanGaps:false,showLine:false},
+      {label:'Outlier',data:d.map(r=>isOutlier(r,method)?r.p:null),backgroundColor:'rgba(192,57,43,0.85)',borderColor:'transparent',pointRadius:7,pointHoverRadius:9,pointStyle:'triangle',spanGaps:false,showLine:false}
+    ]},options:{responsive:true,maintainAspectRatio:false,
+    plugins:{legend:{labels:{font:{size:10},boxWidth:10}},tooltip:{callbacks:{label:ctx=>ctx.dataset.label+': '+d[ctx.dataIndex].ds+' — '+fmt(ctx.parsed.y)+' $'}}},
+    scales:{x:{ticks:{maxTicksLimit:12,font:{size:9}},grid:{display:false}},y:{ticks:{callback:v=>v+' $',font:{size:9}},grid:{color:'#e8edf4'}}}}});{size:9}},grid:{color:'#e8edf4'}}}}});
 
   // Z-score histogram
   const zs=d.map(r=>r.zs); const zMin=Math.floor(Math.min(...zs)), zMax=Math.ceil(Math.max(...zs));
