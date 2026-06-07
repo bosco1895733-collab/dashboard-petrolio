@@ -834,8 +834,8 @@ function renderOutlier(){
       {label:'Outlier',data:d.map(r=>isOutlier(r,method)?r.p:null),backgroundColor:'rgba(192,57,43,0.85)',borderColor:'transparent',pointRadius:7,pointHoverRadius:9,pointStyle:'triangle',spanGaps:false,showLine:false}
     ]},options:{responsive:true,maintainAspectRatio:false,
     plugins:{legend:{labels:{font:{size:10},boxWidth:10}},tooltip:{callbacks:{label:ctx=>ctx.dataset.label+': '+d[ctx.dataIndex].ds+' — '+fmt(ctx.parsed.y)+' $'}}},
-    scales:{x:{ticks:{maxTicksLimit:12,font:{size:9}},grid:{display:false}},y:{ticks:{callback:v=>v+' $',font:{size:9}},grid:{color:'#e8edf4'}}}}});{size:9}},grid:{color:'#e8edf4'}}}}});
-
+    scales:{x:{ticks:{maxTicksLimit:12,font:{size:9}},grid:{display:false}},y:{ticks:{callback:v=>v+' $',font:{size:9}},grid:{color:'#e8edf4'}}}}});
+ 
   // Z-score histogram
   const zs=d.map(r=>r.zs); const zMin=Math.floor(Math.min(...zs)), zMax=Math.ceil(Math.max(...zs));
   const zbins=[]; for(let b=zMin;b<zMax;b+=0.5) zbins.push(b);
