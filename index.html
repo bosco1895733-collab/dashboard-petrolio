@@ -111,10 +111,10 @@ pre{background:#f4f7fa;padding:14px;border-radius:8px;font-size:.76rem;overflow:
   <div class="nav-item" data-tab="outlier">🔍 Outlier</div>
   <div class="nav-item" data-tab="vol">⚡ Volatilità</div>
   <div class="nav-item" data-tab="stag">📅 Stagionalità</div>
+  <div class="nav-item" data-tab="mappa">🗺️ Mappa Mondiale</div>
   <div class="nav-item" data-tab="corr">🔗 Correlazioni</div>
   <div class="nav-item" data-tab="mlr">🧮 Regressione MLR</div>
   <div class="nav-item" data-tab="dati">📋 Dati Raw</div>
-  <div class="nav-item" data-tab="mappa">🗺️ Mappa Mondiale</div>
 
   <div class="sidebar-filters">
     <label>Anni: <span id="yr-label">2006 – 2026</span></label>
@@ -172,7 +172,7 @@ pre{background:#f4f7fa;padding:14px;border-radius:8px;font-size:.76rem;overflow:
   </div>
   <div class="box">
     <div class="box-title">📦 Boxplot per periodo storico</div>
-    <div class="chart-wrap" style="height:280px"><canvas id="ch-box"></canvas></div>
+    <div id="ch-box-wrap" style="height:320px;position:relative;overflow:hidden"></div>
   </div>
 </div>
 
@@ -791,25 +791,228 @@ function renderDistrib(){
   const tbl=document.getElementById('tbl-stats');
   tbl.innerHTML=rows.map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('');
 
-  // Boxplot per periodo
+  // Boxplot per periodo — SVG custom
   const periodi=ALL_PERIODS.filter(p=>state.periods.has(p));
   const boxData=periodi.map(p=>{
     const ps=d.filter(r=>r.per===p).map(r=>r.p).sort((a,b)=>a-b);
     if(!ps.length) return null;
-    const q1i=ps[Math.floor(ps.length*0.25)], q3i=ps[Math.floor(ps.length*0.75)];
+    const n=ps.length;
+    const q1i=ps[Math.floor(n*0.25)], q3i=ps[Math.floor(n*0.75)];
     const iqri=q3i-q1i;
-    return {min:Math.max(ps[0],q1i-1.5*iqri),q1:q1i,med:ps[Math.floor(ps.length/2)],q3:q3i,max:Math.min(ps[ps.length-1],q3i+1.5*iqri),mean:ps.reduce((a,b)=>a+b)/ps.length};
+    const wLow=q1i-1.5*iqri, wHigh=q3i+1.5*iqri;
+    const whiskerMin=ps.find(v=>v>=wLow)??ps[0];
+    const whiskerMax=[...ps].reverse().find(v=>v<=wHigh)??ps[n-1];
+    const outliers=ps.filter(v=>v<wLow||v>wHigh);
+    const med=n%2===0?(ps[n/2-1]+ps[n/2])/2:ps[Math.floor(n/2)];
+    const mean=ps.reduce((a,b)=>a+b,0)/n;
+    return {whiskerMin,q1:q1i,med,q3:q3i,whiskerMax,mean,outliers,label:p};
   });
 
-  makeChart('ch-box',{type:'bar',data:{
-    labels:periodi,
-    datasets:[
-      {label:'Q1→Q3',data:boxData.map(b=>b?[b.q1,b.q3]:null),backgroundColor:periodi.map(p=>hexToRgba(PERIOD_COLORS[p],.6)),borderColor:periodi.map(p=>PERIOD_COLORS[p]),borderWidth:1.5,barPercentage:0.5},
-      {label:'Mediana',data:boxData.map(b=>b?b.med:null),type:'line',borderColor:'#e07b00',borderWidth:2,pointRadius:5,pointStyle:'rectRot',fill:false}
-    ]
-  },options:{responsive:true,maintainAspectRatio:false,
-    plugins:{legend:{labels:{font:{size:10},boxWidth:10}}},
-    scales:{x:{ticks:{font:{size:9},maxRotation:20},grid:{display:false}},y:{ticks:{callback:v=>v+' $',font:{size:9}},grid:{color:'#e8edf4'}}}}});
+  (function drawBoxplot(){
+    const wrap=document.getElementById('ch-box-wrap');
+    wrap.innerHTML='';
+    // Tooltip div
+    let ttDiv=document.getElementById('box-tooltip');
+    if(!ttDiv){ttDiv=document.createElement('div');ttDiv.id='box-tooltip';ttDiv.style.cssText='position:fixed;background:rgba(255,255,255,0.97);border:1px solid #b0c8e8;border-radius:8px;padding:10px 14px;font-size:.78rem;pointer-events:none;opacity:0;transition:opacity .15s;z-index:200;box-shadow:0 2px 8px rgba(0,0,0,.12);min-width:150px;color:#1a2a3a;';document.body.appendChild(ttDiv);}
+    const W=wrap.clientWidth||700, H=320;
+    const margin={top:20,right:20,bottom:60,left:52};
+    const innerW=W-margin.left-margin.right, innerH=H-margin.top-margin.bottom;
+
+    // y scale
+    const allVals=boxData.flatMap(b=>b?[b.whiskerMin,b.whiskerMax,...b.outliers]:[]);
+    const yMin=Math.floor((Math.min(...allVals)-5)/10)*10;
+    const yMax=Math.ceil((Math.max(...allVals)+5)/10)*10;
+    const yScale=v=>innerH-(v-yMin)/(yMax-yMin)*innerH;
+
+    const n=periodi.length;
+    const slotW=innerW/n;
+    const boxW=Math.min(slotW*0.45,60);
+
+    const ns='http://www.w3.org/2000/svg';
+    const svg=document.createElementNS(ns,'svg');
+    svg.setAttribute('width',W); svg.setAttribute('height',H);
+    svg.style.fontFamily="'Segoe UI',system-ui,sans-serif";
+
+    const g=document.createElementNS(ns,'g');
+    g.setAttribute('transform',`translate(${margin.left},${margin.top})`);
+    svg.appendChild(g);
+
+    // Grid + Y axis
+    const yTicks=[];
+    const step=(yMax-yMin)<=80?10:20;
+    for(let v=yMin;v<=yMax;v+=step) yTicks.push(v);
+    yTicks.forEach(v=>{
+      const y=yScale(v);
+      const line=document.createElementNS(ns,'line');
+      line.setAttribute('x1',0); line.setAttribute('x2',innerW);
+      line.setAttribute('y1',y); line.setAttribute('y2',y);
+      line.setAttribute('stroke','#e8edf4'); line.setAttribute('stroke-width','1');
+      g.appendChild(line);
+      const txt=document.createElementNS(ns,'text');
+      txt.setAttribute('x',-8); txt.setAttribute('y',y+4);
+      txt.setAttribute('text-anchor','end'); txt.setAttribute('font-size','9');
+      txt.setAttribute('fill','#7a8a9a'); txt.textContent=v+' $';
+      g.appendChild(txt);
+    });
+
+    // Legend
+    const legG=document.createElementNS(ns,'g');
+    legG.setAttribute('transform',`translate(${innerW/2-80},${-14})`);
+    [[0,'#4a90e2','IQR Box'],[90,'#e07b00','Mediana'],[180,'#1a3a6e','Media ◆'],[270,'#c0392b','Outlier']].forEach(([x,col,lbl])=>{
+      const r=document.createElementNS(ns,'rect');
+      r.setAttribute('x',x); r.setAttribute('y',-7);
+      r.setAttribute('width',10); r.setAttribute('height',10);
+      r.setAttribute('fill',col); r.setAttribute('rx',2);
+      legG.appendChild(r);
+      const t=document.createElementNS(ns,'text');
+      t.setAttribute('x',x+13); t.setAttribute('y',3);
+      t.setAttribute('font-size','9'); t.setAttribute('fill','#4a6a8a');
+      t.textContent=lbl; legG.appendChild(t);
+    });
+    g.appendChild(legG);
+
+    // Boxes
+    boxData.forEach((b,i)=>{
+      if(!b) return;
+      const cx=slotW*i+slotW/2;
+      const color=PERIOD_COLORS[periodi[i]]||'#4a90e2';
+
+      // Whisker lines (vertical)
+      const wLine=document.createElementNS(ns,'line');
+      wLine.setAttribute('x1',cx); wLine.setAttribute('x2',cx);
+      wLine.setAttribute('y1',yScale(b.whiskerMax)); wLine.setAttribute('y2',yScale(b.whiskerMin));
+      wLine.setAttribute('stroke',color); wLine.setAttribute('stroke-width','1.5');
+      wLine.setAttribute('stroke-dasharray','4,2');
+      g.appendChild(wLine);
+
+      // Whisker caps
+      [b.whiskerMin,b.whiskerMax].forEach(v=>{
+        const cap=document.createElementNS(ns,'line');
+        cap.setAttribute('x1',cx-boxW/2*0.5); cap.setAttribute('x2',cx+boxW/2*0.5);
+        cap.setAttribute('y1',yScale(v)); cap.setAttribute('y2',yScale(v));
+        cap.setAttribute('stroke',color); cap.setAttribute('stroke-width','2');
+        g.appendChild(cap);
+      });
+
+      // IQR Box
+      const bx=document.createElementNS(ns,'rect');
+      const bTop=yScale(b.q3), bBot=yScale(b.q1), bH=bBot-bTop;
+      bx.setAttribute('x',cx-boxW/2); bx.setAttribute('y',bTop);
+      bx.setAttribute('width',boxW); bx.setAttribute('height',Math.max(bH,2));
+      bx.setAttribute('fill',hexToRgba(color,0.25));
+      bx.setAttribute('stroke',color); bx.setAttribute('stroke-width','2');
+      bx.setAttribute('rx','3');
+      g.appendChild(bx);
+
+      // Median line
+      const medLine=document.createElementNS(ns,'line');
+      medLine.setAttribute('x1',cx-boxW/2); medLine.setAttribute('x2',cx+boxW/2);
+      medLine.setAttribute('y1',yScale(b.med)); medLine.setAttribute('y2',yScale(b.med));
+      medLine.setAttribute('stroke','#e07b00'); medLine.setAttribute('stroke-width','2.5');
+      g.appendChild(medLine);
+
+      // Median label
+      const medTxt=document.createElementNS(ns,'text');
+      medTxt.setAttribute('x',cx+boxW/2+4); medTxt.setAttribute('y',yScale(b.med)+4);
+      medTxt.setAttribute('font-size','8'); medTxt.setAttribute('fill','#e07b00');
+      medTxt.textContent=b.med.toFixed(1);
+      g.appendChild(medTxt);
+
+      // Mean diamond
+      const dm=document.createElementNS(ns,'polygon');
+      const my=yScale(b.mean), ds=5;
+      dm.setAttribute('points',`${cx},${my-ds} ${cx+ds},${my} ${cx},${my+ds} ${cx-ds},${my}`);
+      dm.setAttribute('fill','#1a3a6e'); dm.setAttribute('opacity','0.8');
+      g.appendChild(dm);
+
+      // Outliers
+      b.outliers.forEach(ov=>{
+        const c=document.createElementNS(ns,'circle');
+        c.setAttribute('cx',cx); c.setAttribute('cy',yScale(ov));
+        c.setAttribute('r','4'); c.setAttribute('fill','none');
+        c.setAttribute('stroke','#c0392b'); c.setAttribute('stroke-width','1.5');
+        g.appendChild(c);
+      });
+
+      // Invisible hover area covering full whisker range
+      const hoverRect=document.createElementNS(ns,'rect');
+      hoverRect.setAttribute('x',cx-boxW/2-6);
+      hoverRect.setAttribute('y',yScale(b.whiskerMax)-6);
+      hoverRect.setAttribute('width',boxW+12);
+      hoverRect.setAttribute('height',yScale(b.whiskerMin)-yScale(b.whiskerMax)+12);
+      hoverRect.setAttribute('fill','transparent');
+      hoverRect.style.cursor='default';
+      hoverRect.addEventListener('mouseenter',function(e){
+        ttDiv.innerHTML=`<div style="font-weight:600;color:#1a3a6e;margin-bottom:6px;font-size:.82rem">${periodi[i]}</div>`+
+          `<div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 12px">` +
+          `<span style="color:#7a8a9a">Max whisker</span><span style="text-align:right;font-weight:600">${b.whiskerMax.toFixed(1)} $</span>`+
+          `<span style="color:#7a8a9a">Q3 (75°)</span><span style="text-align:right;font-weight:600;color:${PERIOD_COLORS[periodi[i]]||'#4a90e2'}">${b.q3.toFixed(1)} $</span>`+
+          `<span style="color:#e07b00">Mediana</span><span style="text-align:right;font-weight:600;color:#e07b00">${b.med.toFixed(1)} $</span>`+
+          `<span style="color:#1a3a6e">Media</span><span style="text-align:right;font-weight:600;color:#1a3a6e">${b.mean.toFixed(1)} $</span>`+
+          `<span style="color:#7a8a9a">Q1 (25°)</span><span style="text-align:right;font-weight:600;color:${PERIOD_COLORS[periodi[i]]||'#4a90e2'}">${b.q1.toFixed(1)} $</span>`+
+          `<span style="color:#7a8a9a">Min whisker</span><span style="text-align:right;font-weight:600">${b.whiskerMin.toFixed(1)} $</span>`+
+          `<span style="color:#7a8a9a">IQR</span><span style="text-align:right;font-weight:600">${(b.q3-b.q1).toFixed(1)} $</span>`+
+          (b.outliers.length?`<span style="color:#c0392b">Outlier</span><span style="text-align:right;font-weight:600;color:#c0392b">${b.outliers.length}</span>`:'')
+          +`</div>`;
+        ttDiv.style.opacity='1';
+        ttDiv.style.left=(e.clientX+14)+'px';
+        ttDiv.style.top=(e.clientY-10)+'px';
+      });
+      hoverRect.addEventListener('mousemove',function(e){
+        ttDiv.style.left=(e.clientX+14)+'px';
+        ttDiv.style.top=(e.clientY-10)+'px';
+      });
+      hoverRect.addEventListener('mouseleave',function(){
+        ttDiv.style.opacity='0';
+      });
+      g.appendChild(hoverRect);
+
+      // X label
+      const lbl=document.createElementNS(ns,'text');
+      lbl.setAttribute('x',cx); lbl.setAttribute('y',innerH+14);
+      lbl.setAttribute('text-anchor','middle'); lbl.setAttribute('font-size','9');
+      lbl.setAttribute('fill','#5a7a9a');
+      // Split long label
+      const parts=periodi[i].split(' ');
+      if(parts.length>=2){
+        const t1=document.createElementNS(ns,'tspan');
+        t1.setAttribute('x',cx); t1.setAttribute('dy','0');
+        t1.textContent=parts.slice(0,2).join(' ');
+        lbl.appendChild(t1);
+        if(parts.length>2){
+          const t2=document.createElementNS(ns,'tspan');
+          t2.setAttribute('x',cx); t2.setAttribute('dy','12');
+          t2.textContent=parts.slice(2).join(' ');
+          lbl.appendChild(t2);
+        }
+      } else {
+        lbl.textContent=periodi[i];
+      }
+      g.appendChild(lbl);
+    });
+
+    // Connecting line through medians
+    const medPoints=boxData.map((b,i)=>b?{x:slotW*i+slotW/2, y:yScale(b.med)}:null).filter(Boolean);
+    if(medPoints.length>1){
+      const polyline=document.createElementNS(ns,'polyline');
+      polyline.setAttribute('points',medPoints.map(p=>`${p.x},${p.y}`).join(' '));
+      polyline.setAttribute('fill','none');
+      polyline.setAttribute('stroke','#e07b00');
+      polyline.setAttribute('stroke-width','2');
+      polyline.setAttribute('stroke-dasharray','6,3');
+      polyline.setAttribute('opacity','0.7');
+      g.insertBefore(polyline, g.firstChild); // sotto i box
+    }
+
+    // Y axis line
+    const yAxis=document.createElementNS(ns,'line');
+    yAxis.setAttribute('x1',0); yAxis.setAttribute('x2',0);
+    yAxis.setAttribute('y1',0); yAxis.setAttribute('y2',innerH);
+    yAxis.setAttribute('stroke','#c8d8e8'); yAxis.setAttribute('stroke-width','1');
+    g.appendChild(yAxis);
+
+    wrap.appendChild(svg);
+  })();
 
   document.getElementById('bin-w').onchange=renderDistrib;
 }
